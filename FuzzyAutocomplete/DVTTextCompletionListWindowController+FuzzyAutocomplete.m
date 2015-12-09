@@ -145,9 +145,10 @@ const char kRowHeightKey;
 // We modify titleColumnX with score column's width, so that title column is aligned with typed text
 - (CGRect) _fa_preferredWindowFrameForTextFrame: (CGRect) textFrame columnsWidth: (double *) widths titleColumnX: (double) titleX {
     NSTableView * tableView = [self valueForKey: @"_completionsTableView"];
-    return [self _fa_preferredWindowFrameForTextFrame: textFrame columnsWidth: widths titleColumnX: titleX + [self _fa_widthForScoreColumn] + tableView.intercellSpacing.width];
+    NSTableColumn * scoreColumn = [tableView tableColumnWithIdentifier: @"score"];
+    CGFloat additionalWidth = scoreColumn ? [self _fa_widthForScoreColumn] + tableView.intercellSpacing.width : 0;
+    return [self _fa_preferredWindowFrameForTextFrame: textFrame columnsWidth: widths titleColumnX: titleX + additionalWidth];
 }
-
 
 // We add visual feedback for the matched ranges. Also format the score column.
 - (void) _fa_tableView: (NSTableView *) aTableView
@@ -161,13 +162,24 @@ const char kRowHeightKey;
         NSTextFieldCell * textFieldCell = (NSTextFieldCell *) aCell;
         textFieldCell.textColor = textFieldCell.isHighlighted ? [FATheme cuurrentTheme].listTextColorForSelectedScore : [FATheme cuurrentTheme].listTextColorForScore;
     } else if ([aTableColumn.identifier isEqualToString:@"title"]) {
-        id<DVTTextCompletionItem> item = self.session.filteredCompletionsAlpha[rowIndex];
-        NSArray * ranges = [self.session fa_matchedRangesForItem: item];
-        NSArray * second = [self.session fa_secondPassMatchedRangesForItem: item];
-
-        if (!ranges.count) {
+        if (rowIndex >= self.session.filteredCompletionsAlpha.count) {
+            RLog(@"Warning: Row out of bounds, skipping.");
             return;
         }
+    
+        id<DVTTextCompletionItem> item = self.session.filteredCompletionsAlpha[rowIndex];
+        if (![item.displayText isEqualToString: aCell.stringValue]) {
+            RLog(@"Warning: Item displayText different from cell stringValue, skipping.");
+            return;
+        }
+
+        NSArray * ranges = [self.session fa_matchedRangesForItem: item];
+        if (!ranges.count) {
+            RLog("Warning: No ranges matched for item, skipping");
+            return;
+        }
+
+        NSArray * second = [self.session fa_secondPassMatchedRangesForItem: item];
 
         NSMutableAttributedString * attributed = [aCell.attributedStringValue mutableCopy];
 
@@ -193,7 +205,7 @@ const char kRowHeightKey;
 
 
         NSString * prefix = self.session.usefulPrefix;
-        if ([item.name hasPrefix: prefix] && ![item.displayText hasPrefix: prefix]) {
+        if (prefix && [item.name hasPrefix: prefix] && ![item.displayText hasPrefix: prefix]) {
             NSRange prefixRange = NSMakeRange(0, prefix.length);
             NSArray * prefixRanges = [self.session fa_convertRanges: @[ [NSValue valueWithRange: prefixRange] ]
                                                          fromString: item.name
@@ -226,10 +238,10 @@ const char kRowHeightKey;
 - (CGFloat) _fa_widthForScoreColumn {
     NSTableView * tableView = [self valueForKey: @"_completionsTableView"];
     NSTableColumn * scoreColumn = [tableView tableColumnWithIdentifier: @"score"];
-    if (scoreColumn && self.session.fa_nonZeroScores) {
+    DVTFontAndColorTheme * theme = [DVTFontAndColorTheme currentTheme];
+    if (scoreColumn && self.session.fa_nonZeroScores && theme.sourcePlainTextFont) {
         NSNumberFormatter * formatter = ((NSCell *)scoreColumn.dataCell).formatter;
         NSString * sampleValue = [formatter stringFromNumber: @0];
-        DVTFontAndColorTheme * theme = [DVTFontAndColorTheme currentTheme];
         NSDictionary * attributes = @{ NSFontAttributeName : theme.sourcePlainTextFont };
         return [[NSAttributedString alloc] initWithString: sampleValue attributes: attributes].size.width + 6;
     } else {
